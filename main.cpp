@@ -183,19 +183,24 @@ int main() {
 
         }
 
-        if(count == 50 | errorResponse) {
-            if(errorResponse) std::cout << "ERROR: UNREOCGNIZED RESPONSE\n";
-            else std::cout << "OK: MAX AMOUNT OF REQUESTS REACHED\n";
+        if(errorResponse) {
+            std::cout << "ERROR: UNREOCGNIZED RESPONSE\n";
             return 1;
         }
 
         index = (index + 1) % words.size();
         std::ofstream{"index.txt"} << index;
 
+        if(count == 50) {
+            std::cout << "OK: MAX AMOUNT OF REQUESTS REACHED\n";
+            return 0;
+        }
+
         ss.str(std::string{});
         auto const next = cur + std::chrono::seconds(10);
         std::this_thread::sleep_until(next);
         cur = next;
     }
-    return 0;
+
+    assert(false) /*unreachable*/;
 }

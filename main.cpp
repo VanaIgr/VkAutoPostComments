@@ -27,26 +27,39 @@ static char const *exec(char const *const cmd) {
     return buf;
 }
 
-static constexpr auto pattern = "{\"response\":{\"comment_id\":$,\"parents_stack\":[]}}";
+static constexpr auto pattern = "{\"response\":{\"comment_id\":$,\"parents_stack\":[#]}}";
 
-static bool checkPattern(char const *it) {
+struct PatternResult {
+    bool ok;
+    int commentId;
+};
+
+static PatternResult parsePattern(char const *it) {
+    if(it == nullptr) return {};
     auto pat = pattern;
-    while(*it != '\0' & *pat != '\0') {
+    int commentId = -1;
+    while(true) {
+        if(*pat == '#') return { true, commentId };
+	if(*it == '\0' | *pat == '\0') return { *it == *pat, commentId };
+
         while(*it == ' ' | *it == '\n') it++;
         while(*pat == ' '| *pat == '\n') pat++;
+
         if(*pat == '$') {
-            while(*it >= '0' & *it <= '9') it++;
+            commentId = 0;
+            while(*it >= '0' & *it <= '9') { 
+                commentId = commentId*10 + (*it - '0');
+                it++;
+            }
             pat++;
         }
-        if(*pat != *it) {
-            //std::cout << "@" << (int)*it << ' ' << (int)*pat << '\n';
-            return false;
-        }
-        it++;
-        pat++;
+	else if(*pat != *it) return {};
+        else {
+            it++;
+            pat++;
+    	}
     }
-    //std::cout << "@" << (int)*it << ' ' << (int)*pat << '\n';
-    return *it == *pat;
+    assert(false /*unreachable*/);
 }
 
 static char const *toHex(unsigned char const codePoint) {
@@ -100,10 +113,14 @@ int main() {
             words.emplace_back(ss.str());
             ss.str(std::string{});
         }
+
+	ss << std::dec;
     }
 
-    using configStr_t = char *;
+    using configStr_t = char const *;
+    static constexpr auto invalidStr = "@@@@invalid@@@@"; 
     configStr_t accessToken, ownerId, postId; 
+    accessToken = ownerId = postId = invalidStr;
     /*read config*/ {
         auto i = std::ifstream{"config.txt"};
         i.seekg(0, i.end);
@@ -137,8 +154,10 @@ int main() {
         postId = configStr + strEnds[1] + 1u;
     }
 
-    size_t index, count = 0;
-    std::ifstream{"index.txt"} >> index;
+    static constexpr auto shouldReplyToPrev = true;
+
+    ssize_t index = 0, replyTo = -1, count = 0;
+    std::ifstream{"index.txt"} >> index >> replyTo;
 
     auto const start = std::chrono::steady_clock::now();
     auto const startTime = time(NULL);
@@ -152,8 +171,10 @@ int main() {
     }
 
     while(true) {
-        ss << TOSTRING(COMMAND1) << " \'owner_id=" << ownerId << "&post_id=" << postId 
-            << "&message=" << words[index] << "&access_token=" << accessToken << "&v=5.131\'";
+        ss << TOSTRING(COMMAND1) << " \'owner_id=" << ownerId << "&post_id=" << postId;
+        if(shouldReplyToPrev && replyTo != -1) ss << "&reply_to_comment=" << replyTo;
+        ss << "&message=" << words[index] << "&access_token=" << accessToken << "&v=5.131\'";
+
 
         auto const v = exec(ss.str().c_str());
         count++;
@@ -169,7 +190,8 @@ int main() {
         std::cout.flush();
 
 
-        auto const errorResponse = v == nullptr || !checkPattern(v);
+	auto const responseResult = parsePattern(v);
+        auto const errorResponse = !responseResult.ok;
         auto const finish = count == 50 | errorResponse;
 
         /*log current request*/ {
@@ -188,8 +210,9 @@ int main() {
             return 1;
         }
 
+        replyTo = responseResult.commentId;
         index = (index + 1) % words.size();
-        std::ofstream{"index.txt"} << index;
+        std::ofstream{"index.txt"} << index << '\n' << replyTo;
 
         if(count == 50) {
             std::cout << "OK: MAX AMOUNT OF REQUESTS REACHED\n";
